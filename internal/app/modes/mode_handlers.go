@@ -45,8 +45,22 @@ func (h *Handler) moveCursorAndHandleAction(
 	}
 
 	if pendingAction != nil {
-		h.executeActionAtPoint(pendingAction, point)
+		// Execute the action
+		h.logger.Info("Executing action", zap.String("action", *pendingAction))
+		performActionErr := h.actionService.PerformActionAtPoint(ctx, *pendingAction, point)
+		if performActionErr != nil {
+			h.logger.Error("Failed to perform action", zap.Error(performActionErr))
+		}
 
+		// If should re-activate, do it (don't exit mode)
+		if shouldReActivate && reActivateFunc != nil {
+			h.logger.Info("Re-activating mode after action")
+			reActivateFunc()
+			return
+		}
+
+		// Otherwise exit mode
+		h.ExitMode()
 		return
 	}
 
@@ -131,12 +145,25 @@ func (h *Handler) handleHintsModeKey(key string) {
 
 		h.logger.Info("Found element", zap.String("label", hint.Label()))
 
-		h.moveCursorAndHandleAction(
-			center,
-			h.hints.Context.PendingAction(),
-			true,
-			func() { h.activateHintModeInternal(false, nil) },
-		)
+		// Check if single click mode is enabled
+		if h.config.Hints.SingleClick {
+			// In single click mode, perform left click and continue (re-activate)
+			leftClick := "left_click"
+			h.moveCursorAndHandleAction(
+				center,
+				&leftClick,
+				true,
+				func() { h.activateHintModeInternal(false, nil) },
+			)
+		} else {
+			// Normal mode: perform pending action if exists, otherwise re-activate
+			h.moveCursorAndHandleAction(
+				center,
+				h.hints.Context.PendingAction(),
+				true,
+				func() { h.activateHintModeInternal(false, nil) },
+			)
+		}
 	}
 }
 
@@ -179,11 +206,24 @@ func (h *Handler) handleGridModeKey(key string) {
 			zap.Int("y", absolutePoint.Y),
 		)
 
-		h.moveCursorAndHandleAction(
-			absolutePoint,
-			h.grid.Context.PendingAction(),
-			false, // Grid mode doesn't re-activate after cursor movement
-			nil,
-		)
+		// Check if single click mode is enabled
+		if h.config.Grid.SingleClick {
+			// In single click mode, perform left click after grid selection is complete
+			leftClick := "left_click"
+			h.moveCursorAndHandleAction(
+				absolutePoint,
+				&leftClick,
+				false, // Grid mode doesn't re-activate after cursor movement
+				nil,
+			)
+		} else {
+			// Normal mode: perform pending action if exists
+			h.moveCursorAndHandleAction(
+				absolutePoint,
+				h.grid.Context.PendingAction(),
+				false, // Grid mode doesn't re-activate after cursor movement
+				nil,
+			)
+		}
 	}
 }

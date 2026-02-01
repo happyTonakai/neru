@@ -246,6 +246,20 @@ mouse_action_refresh_delay = 0
 
 ```
 
+### Single Click Mode
+
+Enable automatic left click after typing the complete hint label:
+
+```toml
+[hints]
+# When enabled, automatically performs a left click after entering the complete hint label
+# Type: boolean
+# Default: false
+single_click = false
+```
+
+When `single_click = true`, you don't need to press Enter or a click key after typing the hint label - the click happens automatically once the full label is entered.
+
 ### Per-App Overrides
 
 ```toml
@@ -338,6 +352,21 @@ hide_unmatched = true     # Hide non-matching cells
 prewarm_enabled = true    # Prewarm grid caches on startup for faster first use, but uses ~1.5MB memory and CPU at startup. Disable to reduce startup overhead.
 enable_gc = false         # Enable periodic garbage collection every 5 minutes to reduce peak memory usage, but adds CPU overhead. Enable if memory is a concern.
 ```
+
+### Single Click Mode
+
+Enable automatic left click after completing grid selection (including subgrids):
+
+```toml
+[grid]
+# When enabled, automatically performs a left click after completing grid selection
+# (including navigating through subgrids if applicable)
+# Type: boolean
+# Default: false
+single_click = false
+```
+
+When `single_click = true`, you don't need to press Enter or a click key after selecting a grid cell - the click happens automatically once the selection is complete.
 
 **Workflow:** Press grid hotkey → Type coordinates → Action executes
 

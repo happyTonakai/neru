@@ -34,7 +34,7 @@ func NewStyleCache() *StyleCache {
 // Get returns the cached style, calling updater if the cache is invalid (nil FontFamily).
 // The updater function should populate the CachedStyle fields with new C strings.
 // Existing strings are freed before calling updater.
-func (c *StyleCache) Get(updater func(*CachedStyle)) CachedStyle {
+func (c *StyleCache) Get(updater func(*CachedStyle)) *CachedStyle {
 	c.mu.RLock()
 
 	if c.style.FontFamily == nil {
@@ -46,13 +46,12 @@ func (c *StyleCache) Get(updater func(*CachedStyle)) CachedStyle {
 			updater(&c.style)
 		}
 
-		result := c.style
 		c.mu.Unlock()
 
-		return result
+		return &c.style
 	}
 
-	result := c.style
+	result := &c.style
 	c.mu.RUnlock()
 
 	return result

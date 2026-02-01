@@ -192,6 +192,9 @@ type HintsConfig struct {
 	AppConfigs []AppConfig `json:"appConfigs" toml:"app_configs"`
 
 	AdditionalAXSupport AdditionalAXSupport `json:"additionalAxSupport" toml:"additional_ax_support"`
+
+	// SingleClick enables automatic click when exact match is found in hints mode
+	SingleClick bool `json:"singleClick" toml:"single_click"`
 }
 
 // GridConfig defines the visual and behavioral settings for grid mode.
@@ -223,6 +226,9 @@ type GridConfig struct {
 	PrewarmEnabled  bool   `json:"prewarmEnabled"  toml:"prewarm_enabled"`
 	EnableGC        bool   `json:"enableGc"        toml:"enable_gc"`
 	ResetKey        string `json:"resetKey"        toml:"reset_key"`
+
+	// SingleClick enables automatic click when grid input is complete
+	SingleClick bool `json:"singleClick" toml:"single_click"`
 }
 
 // LoggingConfig defines the logging behavior and file management settings.

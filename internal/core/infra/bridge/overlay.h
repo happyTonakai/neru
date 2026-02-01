@@ -40,18 +40,24 @@ typedef struct {
 } HintData;
 
 /// Grid cell style configuration
+/// Note: Fields are ordered to ensure consistent memory layout between C and Go
 typedef struct {
-	int fontSize;                 ///< Font size
-	char *fontFamily;             ///< Font family
-	char *backgroundColor;        ///< Background color
-	char *textColor;              ///< Text color
-	char *matchedTextColor;       ///< Matched text color
-	char *matchedBackgroundColor; ///< Matched background color
-	char *matchedBorderColor;     ///< Matched border color
-	char *borderColor;            ///< Border color
-	int borderWidth;              ///< Border width
-	double backgroundOpacity;     ///< Background opacity
-	double textOpacity;           ///< Text opacity
+	// Pointer fields (8 bytes each on 64-bit) - must come first
+	char *fontFamily;
+	char *backgroundColor;
+	char *textColor;
+	char *matchedTextColor;
+	char *matchedBackgroundColor;
+	char *matchedBorderColor;
+	char *borderColor;
+	
+	// Double fields (8 bytes each)
+	double backgroundOpacity;
+	double textOpacity;
+	
+	// Int fields (4 bytes each) - must come last
+	int fontSize;
+	int borderWidth;
 } GridCellStyle;
 
 /// Grid cell data

@@ -410,7 +410,7 @@ func (o *Overlay) ShowSubgrid(cell *domainGrid.Cell, style Style) {
 	})
 
 	finalStyle := C.GridCellStyle{
-		fontSize:               C.int(style.FontSize()),
+		// Pointers first
 		fontFamily:             (*C.char)(cachedStyle.FontFamily),
 		backgroundColor:        (*C.char)(cachedStyle.BgColor),
 		textColor:              (*C.char)(cachedStyle.TextColor),
@@ -418,9 +418,12 @@ func (o *Overlay) ShowSubgrid(cell *domainGrid.Cell, style Style) {
 		matchedBackgroundColor: (*C.char)(cachedStyle.MatchedBgColor),
 		matchedBorderColor:     (*C.char)(cachedStyle.MatchedBorderColor),
 		borderColor:            (*C.char)(cachedStyle.BorderColor),
-		borderWidth:            C.int(style.BorderWidth()),
-		backgroundOpacity:      C.double(style.Opacity()),
-		textOpacity:            C.double(1.0),
+		// Doubles second
+		backgroundOpacity: C.double(style.Opacity()),
+		textOpacity:       C.double(1.0),
+		// Ints last
+		fontSize:    C.int(style.FontSize()),
+		borderWidth: C.int(style.BorderWidth()),
 	}
 
 	C.NeruClearOverlay(o.window)
@@ -628,7 +631,7 @@ func (o *Overlay) drawGridIncrementalStructural(
 	})
 
 	finalStyle := C.GridCellStyle{
-		fontSize:               C.int(currentStyle.FontSize()),
+		// Pointers first
 		fontFamily:             (*C.char)(cachedStyle.FontFamily),
 		backgroundColor:        (*C.char)(cachedStyle.BgColor),
 		textColor:              (*C.char)(cachedStyle.TextColor),
@@ -636,9 +639,12 @@ func (o *Overlay) drawGridIncrementalStructural(
 		matchedBackgroundColor: (*C.char)(cachedStyle.MatchedBgColor),
 		matchedBorderColor:     (*C.char)(cachedStyle.MatchedBorderColor),
 		borderColor:            (*C.char)(cachedStyle.BorderColor),
-		borderWidth:            C.int(currentStyle.BorderWidth()),
-		backgroundOpacity:      C.double(currentStyle.Opacity()),
-		textOpacity:            C.double(1.0),
+		// Doubles second
+		backgroundOpacity: C.double(currentStyle.Opacity()),
+		textOpacity:       C.double(1.0),
+		// Ints last
+		fontSize:    C.int(currentStyle.FontSize()),
+		borderWidth: C.int(currentStyle.BorderWidth()),
 	}
 
 	// Call incremental C API
@@ -847,7 +853,7 @@ func (o *Overlay) drawGridCells(cellsGo []*domainGrid.Cell, currentInput string,
 	})
 
 	finalStyle := C.GridCellStyle{
-		fontSize:               C.int(style.FontSize()),
+		// Pointers first
 		fontFamily:             (*C.char)(cachedStyle.FontFamily),
 		backgroundColor:        (*C.char)(cachedStyle.BgColor),
 		textColor:              (*C.char)(cachedStyle.TextColor),
@@ -855,9 +861,12 @@ func (o *Overlay) drawGridCells(cellsGo []*domainGrid.Cell, currentInput string,
 		matchedBackgroundColor: (*C.char)(cachedStyle.MatchedBgColor),
 		matchedBorderColor:     (*C.char)(cachedStyle.MatchedBorderColor),
 		borderColor:            (*C.char)(cachedStyle.BorderColor),
-		borderWidth:            C.int(style.BorderWidth()),
-		backgroundOpacity:      C.double(style.Opacity()),
-		textOpacity:            C.double(1.0),
+		// Doubles second
+		backgroundOpacity: C.double(style.Opacity()),
+		textOpacity:       C.double(1.0),
+		// Ints last
+		fontSize:    C.int(style.FontSize()),
+		borderWidth: C.int(style.BorderWidth()),
 	}
 
 	C.NeruClearOverlay(o.window)
