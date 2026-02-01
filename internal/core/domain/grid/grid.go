@@ -27,6 +27,11 @@ const (
 
 	// MinCharactersLength is the minimum length for characters.
 	MinCharactersLength = 2
+	
+	// MaxPrefixCharsPerScreen is the maximum number of characters to use as region prefixes per screen.
+	// Each screen gets its own set of MaxPrefixCharsPerScreen prefix characters.
+	// For example, with 2 screens: Screen 0 uses A-F, Screen 1 uses G-L.
+	MaxPrefixCharsPerScreen = 6
 
 	// MinGridCols is the minimum number of grid columns.
 	MinGridCols = 2
@@ -122,9 +127,14 @@ func (c *Cell) Center() image.Point {
 //   - Medium-large screens (2.5-4M pixels): 40-100px cells
 //   - Very large screens (>4M pixels): 50-120px cells
 //
+// Multi-monitor support: Each screen gets its own set of prefix characters.
+// For example, with characters="ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+//   - Screen 0 (left): uses A-F as prefixes
+//   - Screen 1 (right): uses G-L as prefixes
+//
 // If rowLabels or colLabels are empty, they will be inferred from characters.
 func NewGrid(characters string, bounds image.Rectangle, logger *zap.Logger) *Grid {
-	return NewGridWithLabels(characters, "", "", bounds, logger)
+	return NewGridWithPrefixChars(characters, characters, "", "", bounds, logger)
 }
 
 // NewGridWithLabels creates a grid with custom row and column labels.
@@ -134,8 +144,21 @@ func NewGridWithLabels(
 	bounds image.Rectangle,
 	logger *zap.Logger,
 ) *Grid {
+	return NewGridWithPrefixChars(characters, "", rowLabels, colLabels, bounds, logger)
+}
+
+// NewGridWithPrefixChars creates a grid with separate prefix characters for screen regions.
+//   - prefixChars: characters used for region prefixes (first letter of coordinate)
+//   - characters: characters used for internal grid cells (second and third letters)
+//   - If prefixChars is empty, it will be inferred from characters
+func NewGridWithPrefixChars(
+	characters, prefixChars, rowLabels, colLabels string,
+	bounds image.Rectangle,
+	logger *zap.Logger,
+) *Grid {
 	logger.Debug("Creating new grid",
 		zap.String("characters", characters),
+		zap.String("prefixChars", prefixChars),
 		zap.String("rowLabels", rowLabels),
 		zap.String("colLabels", colLabels),
 		zap.Int("bounds_width", bounds.Dx()),
@@ -144,6 +167,20 @@ func NewGridWithLabels(
 	if characters == "" {
 		characters = "abcdefghijklmnopqrstuvwxyz"
 	}
+
+	// Use prefixChars if provided, otherwise use first part of characters
+	uppercasePrefixChars := strings.ToUpper(prefixChars)
+	if uppercasePrefixChars == "" {
+		uppercasePrefixChars = strings.ToUpper(characters)
+	}
+
+	// For prefix chars, limit to MaxPrefixCharsPerScreen
+	prefixRunes := []rune(uppercasePrefixChars)
+	if len(prefixRunes) > MaxPrefixCharsPerScreen {
+		prefixRunes = prefixRunes[:MaxPrefixCharsPerScreen]
+		uppercasePrefixChars = string(prefixRunes)
+	}
+
 	// Cache uppercase conversion once at the start
 	uppercaseChars := strings.ToUpper(characters)
 	chars := []rune(uppercaseChars)
@@ -156,7 +193,12 @@ func NewGridWithLabels(
 		numChars = len(chars)
 	}
 
-	// Prepare row and column labels
+	// Use prefix chars for region identification
+	// Use full chars for internal grid cells
+	prefixChars = uppercasePrefixChars
+	prefixNumChars := len(prefixRunes)
+
+	// Prepare row and column labels (always use full character set)
 	rowChars := chars
 	colChars := chars
 
@@ -274,6 +316,8 @@ func NewGridWithLabels(
 
 	// Generate cells with spatial region logic
 	cells := generateCellsWithRegions(
+		prefixChars,
+		prefixNumChars,
 		chars,
 		rowChars,
 		colChars,
@@ -391,7 +435,19 @@ func (g *Grid) Index() map[string]*Cell {
 // Each region (identified by first char) fills left-to-right, top-to-bottom.
 // Handles variable label lengths (2, 3, or 4 chars) and distributes remainder pixels
 // to ensure cells cover the entire screen bounds without gaps.
+//
+// New behavior: Regions are evenly distributed across the screen based on the number
+// of available first characters (prefix characters). For example, with 6 prefix chars,
+// the screen is divided into 6 equal regions arranged in an optimal grid layout.
+//
+// Parameters:
+//   - prefixChars: characters used for region identification (first character of coordinate)
+//   - prefixNumChars: number of prefix characters (typically 6)
+//   - chars: full character set used for internal grid cells (second and third characters)
+//   - rowChars, colChars: character sets for row/column labels
+//   - numChars: total number of characters in the full character set
 func generateCellsWithRegions(
+	prefixChars string, prefixNumChars int,
 	chars, rowChars, colChars []rune,
 	numChars, gridCols, gridRows, labelLength int,
 	bounds image.Rectangle,
@@ -400,6 +456,7 @@ func generateCellsWithRegions(
 ) []*Cell {
 	logger.Debug("Generating cells with regions",
 		zap.Int("num_chars", numChars),
+		zap.Int("prefix_num_chars", prefixNumChars),
 		zap.Int("grid_cols", gridCols),
 		zap.Int("grid_rows", gridRows),
 		zap.Int("label_length", labelLength))
@@ -407,33 +464,19 @@ func generateCellsWithRegions(
 	cells := make([]*Cell, gridCols*gridRows)
 	cellIndex := 0
 
-	// Calculate region dimensions based on label length
-	// Each region represents a group of cells sharing the same prefix character(s)
-	var regionCols, regionRows int
+	// Calculate the optimal region layout based on prefixNumChars
+	// This determines how many region rows and columns we need
+	regionLayoutCols, regionLayoutRows := calculateRegionLayout(prefixNumChars, gridCols, gridRows, bounds)
+	logger.Debug("Region layout calculated",
+		zap.Int("region_layout_cols", regionLayoutCols),
+		zap.Int("region_layout_rows", regionLayoutRows))
 
-	// Adjust region size based on label length and available characters
-	switch labelLength {
-	case LabelLength2:
-		// For 2-char labels: each region is len(colChars) x 1
-		regionCols = len(colChars)
-		regionRows = 1
-	case LabelLength3:
-		// For 3-char labels: region + col + row
-		regionCols = len(colChars)
-		regionRows = len(rowChars)
-	default:
-		// For 4-char labels: region1 + region2 + col + row
-		regionCols = len(colChars)
-		regionRows = len(rowChars)
-	}
-
-	// Track current position as we fill regions
-	currentCol := 0
-	currentRow := 0
-
-	// Iterate through regions (first character)
-	regionIndex := 0
-	maxRegions := numChars * numChars // Maximum regions we might need
+	// Calculate how many grid cells each region occupies
+	// Using integer division - remainder will be distributed
+	cellsPerRegionCol := gridCols / regionLayoutCols
+	cellsPerRegionRow := gridRows / regionLayoutRows
+	remainderRegionCols := gridCols % regionLayoutCols
+	remainderRegionRows := gridRows % regionLayoutRows
 
 	// Precompute x/y starts to avoid inner summation loops
 	xStarts := make([]int, gridCols)
@@ -457,125 +500,246 @@ func generateCellsWithRegions(
 		}
 	}
 
-	// Iterate through regions, filling the grid left-to-right, top-to-bottom
-	for regionIndex < maxRegions && currentRow < gridRows {
-		// Determine region identifier character(s) based on label length
-		var regionChar1, regionChar2 rune
+	// Determine internal region dimensions based on label length
+	var internalRegionCols, internalRegionRows int
+	switch labelLength {
+	case LabelLength2:
+		internalRegionCols = len(colChars)
+		internalRegionRows = 1
+	case LabelLength3:
+		internalRegionCols = len(colChars)
+		internalRegionRows = len(rowChars)
+	default: // 4 chars
+		internalRegionCols = len(colChars)
+		internalRegionRows = len(rowChars)
+	}
 
-		switch labelLength {
-		case LabelLength2:
-			regionChar1 = chars[regionIndex%numChars]
-		case LabelLength3:
-			regionChar1 = chars[regionIndex%numChars]
-		default: // 4 chars
-			regionChar1 = chars[regionIndex/numChars%numChars]
-			regionChar2 = chars[regionIndex%numChars]
-		}
+	// Iterate through each region and fill it
+	regionIndex := 0
+	currentRegionRow := 0
+	prefixRunes := []rune(prefixChars)
 
-		// Calculate how many columns this region can occupy
-		colsAvailable := gridCols - currentCol
-		colsForRegion := gridMin(regionCols, colsAvailable)
+	for currentRegionRow < regionLayoutRows && regionIndex < prefixNumChars {
+		currentRegionCol := 0
 
-		// Calculate how many rows this region can occupy
-		rowsAvailable := gridRows - currentRow
-		rowsForRegion := gridMin(regionRows, rowsAvailable)
+		for currentRegionCol < regionLayoutCols && regionIndex < prefixNumChars {
+			// Determine region identifier character(s)
+			var regionChar1 rune
 
-		// Fill this region
-		for rowIndex := range rowsForRegion {
-			for colIndex := range colsForRegion {
-				globalCol := currentCol + colIndex
-				globalRow := currentRow + rowIndex
+			switch labelLength {
+			case LabelLength2, LabelLength3:
+				// For 2-char and 3-char labels: single character identifies the region
+				regionChar1 = prefixRunes[regionIndex]
+			default: // 4 chars
+				// For 4-char labels with uniform region layout:
+				// We have exactly prefixNumChars regions, so use single char for region identifier
+				regionChar1 = prefixRunes[regionIndex]
+			}
 
-				if globalCol >= gridCols || globalRow >= gridRows {
-					break
-				}
+			// Calculate the grid cell range for this region
+			regionStartCol := currentRegionCol*cellsPerRegionCol + gridMin(currentRegionCol, remainderRegionCols)
+			regionStartRow := currentRegionRow*cellsPerRegionRow + gridMin(currentRegionRow, remainderRegionRows)
 
-				// Generate coordinate for this cell
-				// Second char = column within region, third char = row within region
-				var coordinate string
+			regionEndCol := regionStartCol + cellsPerRegionCol
+			if currentRegionCol < remainderRegionCols {
+				regionEndCol++
+			}
 
-				switch labelLength {
-				case LabelLength2:
-					// Use strings.Builder for efficient string concatenation
-					var stringBuilder strings.Builder
-					stringBuilder.Grow(StringBuilderGrow2)
-					stringBuilder.WriteRune(regionChar1)
-					stringBuilder.WriteRune(colChars[colIndex%len(colChars)])
-					coordinate = stringBuilder.String()
-				case LabelLength3:
-					// First char = region, second char = column, third char = row
-					char2 := colChars[colIndex%len(colChars)] // column
-					char3 := rowChars[rowIndex%len(rowChars)] // row
+			regionEndRow := regionStartRow + cellsPerRegionRow
+			if currentRegionRow < remainderRegionRows {
+				regionEndRow++
+			}
 
-					var stringBuilder strings.Builder
-					stringBuilder.Grow(StringBuilderGrow3)
-					stringBuilder.WriteRune(regionChar1)
-					stringBuilder.WriteRune(char2)
-					stringBuilder.WriteRune(char3)
-					coordinate = stringBuilder.String()
+			// Ensure we don't exceed grid bounds
+			regionEndCol = gridMin(regionEndCol, gridCols)
+			regionEndRow = gridMin(regionEndRow, gridRows)
+
+			// Calculate actual cells available in this region
+			actualRegionCols := regionEndCol - regionStartCol
+			actualRegionRows := regionEndRow - regionStartRow
+
+			// Determine how many cells we can actually fill (limited by internal dimensions)
+			fillCols := gridMin(internalRegionCols, actualRegionCols)
+			fillRows := gridMin(internalRegionRows, actualRegionRows)
+
+			// Fill cells in this region
+			for rowIndex := range fillRows {
+				for colIndex := range fillCols {
+					globalCol := regionStartCol + colIndex
+					globalRow := regionStartRow + rowIndex
+
+					if globalCol >= gridCols || globalRow >= gridRows {
+						continue
+					}
+
+					// Generate coordinate for this cell
+					var coordinate string
+
+					switch labelLength {
+					case LabelLength2:
+						var stringBuilder strings.Builder
+						stringBuilder.Grow(StringBuilderGrow2)
+						stringBuilder.WriteRune(regionChar1)
+						stringBuilder.WriteRune(colChars[colIndex%len(colChars)])
+						coordinate = stringBuilder.String()
+					case LabelLength3:
+						char2 := colChars[colIndex%len(colChars)]
+						char3 := rowChars[rowIndex%len(rowChars)]
+
+						var stringBuilder strings.Builder
+						stringBuilder.Grow(StringBuilderGrow3)
+						stringBuilder.WriteRune(regionChar1)
+						stringBuilder.WriteRune(char2)
+						stringBuilder.WriteRune(char3)
+						coordinate = stringBuilder.String()
 				default: // 4 chars
-					// First 2 chars = region, third char = column, fourth char = row
-					char3 := colChars[colIndex%len(colChars)] // column
-					char4 := rowChars[rowIndex%len(rowChars)] // row
+					// For 4-char labels with uniform layout: region + secondary + col + row
+					// Use colIndex to determine secondary char to ensure uniqueness
+					char2 := colChars[colIndex%len(colChars)]
+					char3 := colChars[colIndex%len(colChars)]
+					char4 := rowChars[rowIndex%len(rowChars)]
 
 					var stringBuilder strings.Builder
 					stringBuilder.Grow(StringBuilderGrow4)
 					stringBuilder.WriteRune(regionChar1)
-					stringBuilder.WriteRune(regionChar2)
+					stringBuilder.WriteRune(char2)
 					stringBuilder.WriteRune(char3)
 					stringBuilder.WriteRune(char4)
 					coordinate = stringBuilder.String()
 				}
 
-				// Calculate cell dimensions with remainder distribution
-				cellWidth := baseCellWidth
-				if globalCol < remainderWidth {
-					cellWidth++
-				}
+					// Calculate cell dimensions
+					cellWidth := baseCellWidth
+					if globalCol < remainderWidth {
+						cellWidth++
+					}
 
-				cellHeight := baseCellHeight
-				if globalRow < remainderHeight {
-					cellHeight++
-				}
+					cellHeight := baseCellHeight
+					if globalRow < remainderHeight {
+						cellHeight++
+					}
 
-				xCoordinate := xStarts[globalCol]
-				yCoordinate := yStarts[globalRow]
+					xCoordinate := xStarts[globalCol]
+					yCoordinate := yStarts[globalRow]
 
-				cell := &Cell{
-					coordinate: coordinate,
-					bounds: image.Rect(
-						xCoordinate, yCoordinate,
-						xCoordinate+cellWidth, yCoordinate+cellHeight,
-					),
-					center: image.Point{
-						X: xCoordinate + cellWidth/2,
-						Y: yCoordinate + cellHeight/2,
-					},
+					cell := &Cell{
+						coordinate: coordinate,
+						bounds: image.Rect(
+							xCoordinate, yCoordinate,
+							xCoordinate+cellWidth, yCoordinate+cellHeight,
+						),
+						center: image.Point{
+							X: xCoordinate + cellWidth/2,
+							Y: yCoordinate + cellHeight/2,
+						},
+					}
+					cells[cellIndex] = cell
+					cellIndex++
 				}
-				cells[cellIndex] = cell
-				cellIndex++
 			}
+
+			regionIndex++
+			currentRegionCol++
 		}
-
-		// Move to next region position
-		currentCol += colsForRegion
-
-		// If we've filled the row width, move to next row
-		if currentCol >= gridCols {
-			currentCol = 0
-			currentRow += rowsForRegion
-		}
-
-		regionIndex++
-
-		// Stop if we've filled the entire screen
-		if cellIndex >= gridCols*gridRows {
-			break
-		}
+		currentRegionRow++
 	}
 
 	// Return only the filled portion of the slice
 	return cells[:cellIndex]
+}
+
+// calculateRegionLayout determines the optimal grid layout for regions based on numChars.
+// It finds the best (cols, rows) combination that minimizes aspect ratio deviation
+// from a square and maximizes the number of regions that fit.
+// For example, with 6 chars: prefers 3x2 or 2x3 over 6x1 or 1x6.
+// The layout is adjusted based on screen aspect ratio:
+//   - Landscape screens (width > height): prefers 2 rows × 3 cols layout
+//   - Portrait screens (height > width): prefers 3 rows × 2 cols layout
+func calculateRegionLayout(numChars, gridCols, gridRows int, bounds image.Rectangle) (int, int) {
+	if numChars <= 0 {
+		return 1, 1
+	}
+
+	// Determine if screen is portrait or landscape
+	screenWidth := bounds.Dx()
+	screenHeight := bounds.Dy()
+	isPortrait := screenHeight > screenWidth
+
+	// Find all divisors and valid layouts
+	bestCols, bestRows := numChars, 1
+
+	// Collect all valid layouts first
+	type layout struct {
+		cols, rows int
+		score      float64
+	}
+	var validLayouts []layout
+
+	// Try all possible layouts
+	for cols := 1; cols <= numChars; cols++ {
+		if numChars%cols == 0 {
+			rows := numChars / cols
+
+			// Check if this layout fits within our grid
+			if cols > gridCols || rows > gridRows {
+				continue
+			}
+
+			// Calculate aspect ratio score (prefer square-like regions)
+			layoutAspect := float64(cols) / float64(rows)
+			aspectDiff := math.Abs(layoutAspect - 1.0)
+
+			// Also consider how well the regions fit the screen aspect ratio
+			if gridCols > 0 && gridRows > 0 {
+				screenAspect := float64(gridCols) / float64(gridRows)
+				cellsPerRegionCol := float64(gridCols) / float64(cols)
+				cellsPerRegionRow := float64(gridRows) / float64(rows)
+				regionAspect := cellsPerRegionCol / cellsPerRegionRow
+				fitScore := math.Abs(regionAspect - screenAspect)
+
+				// Combined score: prefer square regions that fit screen well
+				score := aspectDiff + fitScore*0.5
+
+				validLayouts = append(validLayouts, layout{cols, rows, score})
+			} else {
+				validLayouts = append(validLayouts, layout{cols, rows, aspectDiff})
+			}
+		}
+	}
+
+	// Sort layouts by score
+	slices.SortFunc(validLayouts, func(a, b layout) int {
+		if a.score < b.score {
+			return -1
+		}
+		if a.score > b.score {
+			return 1
+		}
+		return 0
+	})
+
+	// Apply screen orientation preference
+	// For portrait screens, prefer more rows; for landscape, prefer more cols
+	for _, l := range validLayouts {
+		if isPortrait && l.rows > l.cols {
+			bestCols = l.cols
+			bestRows = l.rows
+			break
+		}
+		if !isPortrait && l.cols > l.rows {
+			bestCols = l.cols
+			bestRows = l.rows
+			break
+		}
+	}
+
+	// If no orientation-preferred layout found, use the best scored one
+	if bestCols == numChars && bestRows == 1 && len(validLayouts) > 0 {
+		bestCols = validLayouts[0].cols
+		bestRows = validLayouts[0].rows
+	}
+
+	return bestCols, bestRows
 }
 
 // Candidate represents a valid grid configuration.

@@ -91,8 +91,12 @@ func (h *Handler) createGridInstance() *domainGrid.Grid {
 		characters = h.config.Hints.HintCharacters
 	}
 
-	gridInstance := domainGrid.NewGridWithLabels(
-		characters,
+	// Get screen-specific prefix characters for multi-monitor support
+	prefixChars, fullChars := getScreenPrefixCharacters(characters, screenBounds)
+
+	gridInstance := domainGrid.NewGridWithPrefixChars(
+		fullChars,
+		prefixChars,
 		h.config.Grid.RowLabels,
 		h.config.Grid.ColLabels,
 		normalizedBounds,
@@ -101,6 +105,51 @@ func (h *Handler) createGridInstance() *domainGrid.Grid {
 	h.grid.Context.SetGridInstanceValue(gridInstance)
 
 	return gridInstance
+}
+
+// getScreenPrefixCharacters returns prefix characters for the given screen based on screen index.
+// In multi-monitor setups, each screen gets a different set of prefix characters.
+// For example, with 2 screens and 6 prefix chars per screen:
+//   - Screen 0: uses chars[0:6]
+//   - Screen 1: uses chars[6:12]
+// Returns: (prefixChars, fullChars)
+func getScreenPrefixCharacters(allChars string, bounds image.Rectangle) (string, string) {
+	allChars = strings.ToUpper(allChars)
+	if len(allChars) == 0 {
+		allChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	}
+
+	// Get screen index (0-based, left-to-right)
+	screenIndex := bridge.ScreenIndexForBounds(bounds)
+	if screenIndex < 0 {
+		// Fallback to finding by position
+		allScreens := bridge.AllScreenBounds()
+		for i, screen := range allScreens {
+			if screen == bounds {
+				screenIndex = i
+				break
+			}
+		}
+		if screenIndex < 0 {
+			screenIndex = 0
+		}
+	}
+
+	// Calculate prefix range for this screen
+	prefixCount := domainGrid.MaxPrefixCharsPerScreen
+	startIndex := screenIndex * prefixCount
+
+	// Ensure we don't exceed available characters
+	if startIndex >= len(allChars) {
+		startIndex = 0
+	}
+
+	endIndex := startIndex + prefixCount
+	if endIndex > len(allChars) {
+		endIndex = len(allChars)
+	}
+
+	return allChars[startIndex:endIndex], allChars
 }
 
 // updateGridOverlayConfig updates the grid overlay configuration.

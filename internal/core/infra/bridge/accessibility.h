@@ -237,6 +237,16 @@ CGRect getMainScreenBounds(void);
 /// @return Active screen bounds rectangle
 CGRect getActiveScreenBounds(void);
 
+/// Get all screen bounds
+/// @param count Pointer to store the number of screens
+/// @return Array of screen bounds (caller must free)
+CGRect *getAllScreenBounds(int *count);
+
+/// Get screen index for a given bounds (for multi-monitor setups)
+/// @param bounds Screen bounds to match
+/// @return Screen index (0-based), or -1 if not found
+int getScreenIndexForBounds(CGRect bounds);
+
 /// Get current cursor position
 /// @return Current cursor position
 CGPoint getCurrentCursorPosition(void);

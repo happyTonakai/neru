@@ -2,6 +2,8 @@ package overlay
 
 import (
 	"context"
+	"image"
+	"strings"
 
 	gridFeature "github.com/y3owk1n/neru/internal/app/components/grid"
 	overlayHints "github.com/y3owk1n/neru/internal/app/components/hints"
@@ -26,6 +28,58 @@ func NewAdapter(manager uiOverlay.ManagerInterface, logger *zap.Logger) *Adapter
 		manager: manager,
 		logger:  logger,
 	}
+}
+
+// getPrefixCharsForScreen returns the prefix characters for the current screen based on screen index.
+// In multi-monitor setups, each screen gets a different set of prefix characters.
+// For example, with 2 screens and 6 prefix chars per screen:
+//   - Screen 0: uses chars[0:6] (A-F)
+//   - Screen 1: uses chars[6:12] (G-L)
+// Returns: (prefixChars, fullChars)
+func getPrefixCharsForScreen(allChars string, bounds image.Rectangle) (string, string) {
+	allChars = strings.ToUpper(allChars)
+	if len(allChars) == 0 {
+		allChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	}
+
+	// Get screen index (0-based, left-to-right)
+	screenIndex := bridge.ScreenIndexForBounds(bounds)
+	if screenIndex < 0 {
+		// Fallback to active screen detection
+		activeBounds := bridge.ActiveScreenBounds()
+		if activeBounds == bounds {
+			screenIndex = 0
+		} else {
+			// Try to find matching screen
+			allScreens := bridge.AllScreenBounds()
+			for i, screen := range allScreens {
+				if screen == bounds {
+					screenIndex = i
+					break
+				}
+			}
+			if screenIndex < 0 {
+				screenIndex = 0
+			}
+		}
+	}
+
+	// Calculate prefix range for this screen
+	prefixCount := domainGrid.MaxPrefixCharsPerScreen
+	startIndex := screenIndex * prefixCount
+
+	// Ensure we don't exceed available characters
+	if startIndex >= len(allChars) {
+		// Not enough characters for this screen, fallback to first set
+		startIndex = 0
+	}
+
+	endIndex := startIndex + prefixCount
+	if endIndex > len(allChars) {
+		endIndex = len(allChars)
+	}
+
+	return allChars[startIndex:endIndex], allChars
 }
 
 // Show shows the overlay.
@@ -88,8 +142,11 @@ func (a *Adapter) ShowGrid(ctx context.Context) error {
 	// Get screen bounds
 	bounds := bridge.ActiveScreenBounds()
 
-	// Create grid
-	grid := domainGrid.NewGrid("abcdefghijklmnopqrstuvwxyz", bounds, a.logger)
+	// Get prefix characters for this screen (multi-monitor support)
+	prefixChars, fullChars := getPrefixCharsForScreen("abcdefghijklmnopqrstuvwxyz", bounds)
+
+	// Create grid with screen-specific prefix characters and full character set for internal cells
+	grid := domainGrid.NewGridWithPrefixChars(fullChars, prefixChars, "", "", bounds, a.logger)
 
 	// Draw grid
 	drawGridErr := a.manager.DrawGrid(grid, "", gridFeature.Style{})

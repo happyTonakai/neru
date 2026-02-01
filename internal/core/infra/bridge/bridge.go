@@ -225,6 +225,58 @@ func ActiveScreenBounds() image.Rectangle {
 	return result
 }
 
+// AllScreenBounds retrieves bounds for all screens sorted left-to-right.
+func AllScreenBounds() []image.Rectangle {
+	log := getLogger()
+	log.Debug("Bridge: AllScreenBounds called")
+
+	var count C.int
+	boundsPtr := C.getAllScreenBounds(&count)
+	if boundsPtr == nil || count == 0 {
+		return nil
+	}
+	defer C.free(unsafe.Pointer(boundsPtr))
+
+	screens := make([]image.Rectangle, int(count))
+	boundsSlice := unsafe.Slice(boundsPtr, int(count))
+	
+	for i, rect := range boundsSlice {
+		screens[i] = image.Rect(
+			int(rect.origin.x),
+			int(rect.origin.y),
+			int(rect.origin.x+rect.size.width),
+			int(rect.origin.y+rect.size.height),
+		)
+	}
+
+	log.Debug("Bridge: All screen bounds",
+		zap.Int("count", len(screens)))
+
+	return screens
+}
+
+// ScreenIndexForBounds returns the index (left-to-right) of the screen matching the given bounds.
+func ScreenIndexForBounds(bounds image.Rectangle) int {
+	log := getLogger()
+	log.Debug("Bridge: ScreenIndexForBounds called",
+		zap.Int("x", bounds.Min.X),
+		zap.Int("y", bounds.Min.Y))
+
+	cgRect := C.CGRectMake(
+		C.CGFloat(bounds.Min.X),
+		C.CGFloat(bounds.Min.Y),
+		C.CGFloat(bounds.Dx()),
+		C.CGFloat(bounds.Dy()),
+	)
+	
+	index := int(C.getScreenIndexForBounds(cgRect))
+	
+	log.Debug("Bridge: Screen index result",
+		zap.Int("index", index))
+
+	return index
+}
+
 // ShowConfigValidationError displays a native macOS alert for config validation errors.
 // Returns true if the user clicked the "Copy Config Path" button.
 func ShowConfigValidationError(errorMessage, configPath string) bool {

@@ -33,40 +33,40 @@ func TestGridManager_RouterIntegration(t *testing.T) {
 	gridRouter := grid.NewRouter(gridManager, logger)
 
 	t.Run("Grid routing workflow", func(t *testing.T) {
-		// Test typing "a" - should be valid input (4-char labels needed)
+		// Test typing "a" - should be valid input (3-char labels needed with uniform region layout)
 		result1 := gridRouter.RouteKey("a")
 		if result1.Exit() {
 			t.Error("Expected not to exit on 'a'")
 		}
 
-		// Test typing "s" - still not complete
-		result2 := gridRouter.RouteKey("s")
+		// Test typing "a" again - still not complete (building coordinate "AAA")
+		result2 := gridRouter.RouteKey("a")
 		if result2.Exit() {
-			t.Error("Expected not to exit on 's'")
+			t.Error("Expected not to exit on second 'a'")
 		}
 
 		if result2.Complete() {
 			t.Error("Expected not complete on two characters")
 		}
 
-		// Test typing "d" - still not complete
-		result3 := gridRouter.RouteKey("d")
+		// Test typing "a" third time - reaches labelLength (3), enters subgrid but not complete yet
+		result3 := gridRouter.RouteKey("a")
 		if result3.Exit() {
-			t.Error("Expected not to exit on 'd'")
+			t.Error("Expected not to exit on third 'a'")
 		}
 
 		if result3.Complete() {
-			t.Error("Expected not complete on three characters")
+			t.Error("Expected not complete on third character (enters subgrid mode)")
 		}
 
-		// Test typing "f" - should complete coordinate
-		result4 := gridRouter.RouteKey("f")
+		// Test typing "a" fourth time - subgrid selection, should complete
+		result4 := gridRouter.RouteKey("a")
 		if result4.Exit() {
-			t.Error("Expected not to exit on 'f'")
+			t.Error("Expected not to exit on fourth 'a' (subgrid selection)")
 		}
 
 		if !result4.Complete() {
-			t.Error("Expected complete on fourth character")
+			t.Error("Expected complete on subgrid selection")
 		}
 
 		// Check target point

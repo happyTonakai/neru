@@ -226,6 +226,107 @@ CGRect getActiveScreenBounds(void) {
 	}
 }
 
+/// Get all screen bounds
+/// @param count Pointer to store the number of screens
+/// @return Array of screen bounds sorted by x-coordinate (left to right), caller must free
+CGRect *getAllScreenBounds(int *count) {
+	@autoreleasepool {
+		NSArray *screens = [NSScreen screens];
+		if (!screens || screens.count == 0) {
+			*count = 0;
+			return NULL;
+		}
+		
+		int screenCount = (int)screens.count;
+		CGRect *boundsArray = malloc(sizeof(CGRect) * screenCount);
+		if (!boundsArray) {
+			*count = 0;
+			return NULL;
+		}
+		
+		// Get the primary screen height to flip Y coordinate
+		NSScreen *primaryScreen = [screens firstObject];
+		CGFloat primaryScreenHeight = primaryScreen.frame.size.height;
+		
+		// Store screens with their x-coordinate for sorting
+		typedef struct {
+			CGRect bounds;
+			CGFloat x;
+		} ScreenInfo;
+		
+		ScreenInfo *screenInfos = malloc(sizeof(ScreenInfo) * screenCount);
+		if (!screenInfos) {
+			free(boundsArray);
+			*count = 0;
+			return NULL;
+		}
+		
+		// Collect screen bounds and x-coordinates
+		int i = 0;
+		for (NSScreen *screen in screens) {
+			NSRect nsFrame = screen.frame;
+			
+			// Convert to CG coordinates (top-left origin)
+			CGRect cgFrame;
+			cgFrame.origin.x = nsFrame.origin.x;
+			cgFrame.origin.y = primaryScreenHeight - (nsFrame.origin.y + nsFrame.size.height);
+			cgFrame.size.width = nsFrame.size.width;
+			cgFrame.size.height = nsFrame.size.height;
+			
+			screenInfos[i].bounds = cgFrame;
+			screenInfos[i].x = cgFrame.origin.x;
+			i++;
+		}
+		
+		// Sort by x-coordinate (left to right)
+		for (i = 0; i < screenCount - 1; i++) {
+			for (int j = i + 1; j < screenCount; j++) {
+				if (screenInfos[j].x < screenInfos[i].x) {
+					ScreenInfo temp = screenInfos[i];
+					screenInfos[i] = screenInfos[j];
+					screenInfos[j] = temp;
+				}
+			}
+		}
+		
+		// Copy sorted bounds to result array
+		for (i = 0; i < screenCount; i++) {
+			boundsArray[i] = screenInfos[i].bounds;
+		}
+		
+		free(screenInfos);
+		*count = screenCount;
+		return boundsArray;
+	}
+}
+
+/// Get screen index for a given bounds (for multi-monitor setups)
+/// @param bounds Screen bounds to match
+/// @return Screen index (0-based, left to right), or -1 if not found
+int getScreenIndexForBounds(CGRect bounds) {
+	@autoreleasepool {
+		int count = 0;
+		CGRect *allBounds = getAllScreenBounds(&count);
+		
+		if (!allBounds || count == 0) {
+			return -1;
+		}
+		
+		// Find matching screen by comparing origin
+		int index = -1;
+		for (int i = 0; i < count; i++) {
+			if (fabs(allBounds[i].origin.x - bounds.origin.x) < 1.0 &&
+			    fabs(allBounds[i].origin.y - bounds.origin.y) < 1.0) {
+				index = i;
+				break;
+			}
+		}
+		
+		free(allBounds);
+		return index;
+	}
+}
+
 /// Get current cursor position
 /// @return Current cursor position
 CGPoint getCurrentCursorPosition(void) {
