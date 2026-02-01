@@ -431,6 +431,68 @@ func (g *Grid) Index() map[string]*Cell {
 	return g.index
 }
 
+// RegionBounds returns the bounds of a specific region by its prefix character.
+// Returns the bounds and true if found, or zero bounds and false if not found.
+func (g *Grid) RegionBounds(prefixChar string) (image.Rectangle, bool) {
+	if len(g.cells) == 0 {
+		return image.Rectangle{}, false
+	}
+
+	prefixChar = strings.ToUpper(prefixChar)
+	if len(prefixChar) != 1 {
+		return image.Rectangle{}, false
+	}
+
+	minX := g.bounds.Max.X
+	minY := g.bounds.Max.Y
+	maxX := g.bounds.Min.X
+	maxY := g.bounds.Min.Y
+	found := false
+
+	for _, cell := range g.cells {
+		if strings.HasPrefix(cell.Coordinate(), prefixChar) {
+			bounds := cell.Bounds()
+			if bounds.Min.X < minX {
+				minX = bounds.Min.X
+			}
+			if bounds.Min.Y < minY {
+				minY = bounds.Min.Y
+			}
+			if bounds.Max.X > maxX {
+				maxX = bounds.Max.X
+			}
+			if bounds.Max.Y > maxY {
+				maxY = bounds.Max.Y
+			}
+			found = true
+		}
+	}
+
+	return image.Rect(minX, minY, maxX, maxY), found
+}
+
+// RegionLabels returns all region prefix characters.
+func (g *Grid) RegionLabels() []string {
+	if len(g.cells) == 0 {
+		return nil
+	}
+
+	labels := make(map[string]bool)
+	for _, cell := range g.cells {
+		coord := cell.Coordinate()
+		if len(coord) > 0 {
+			prefix := coord[:1]
+			labels[prefix] = true
+		}
+	}
+
+	result := make([]string, 0, len(labels))
+	for label := range labels {
+		result = append(result, label)
+	}
+	return result
+}
+
 // generateCellsWithRegions creates cells using spatial region logic.
 // Each region (identified by first char) fills left-to-right, top-to-bottom.
 // Handles variable label lengths (2, 3, or 4 chars) and distributes remainder pixels

@@ -62,12 +62,20 @@ typedef struct {
 
 /// Grid cell data
 typedef struct {
-	char *label;             ///< Cell label
+	char *label;             ///< Cell label (display text)
+	char *fullCoordinate;    ///< Full coordinate (hidden, for matching)
 	CGRect bounds;           ///< Cell rectangle
 	int isMatched;           ///< Cell matches current input (1 = yes, 0 = no)
 	int isSubgrid;           ///< Cell is part of subgrid (1 = yes, 0 = no)
 	int matchedPrefixLength; ///< Number of matched characters at beginning of label
 } GridCell;
+
+/// Region label data for 2x3 region display
+typedef struct {
+	char *label;    ///< Region label (A, B, C, D, E, F)
+	CGRect bounds;  ///< Region rectangle
+	int isMatched;  ///< Region matches current input prefix (1 = yes, 0 = no)
+} RegionLabel;
 
 /// Callback type for async operations
 /// @param context Context pointer
@@ -171,5 +179,16 @@ void NeruSetHideUnmatched(OverlayWindow window, int hide);
 /// @param style Grid cell style (used for new/updated cells)
 void NeruDrawIncrementGrid(OverlayWindow window, GridCell *cellsToAdd, int addCount, CGRect *cellsToRemove,
                            int removeCount, GridCellStyle style);
+
+/// Draw region labels for 2x3 region overlay
+/// @param window Overlay window handle
+/// @param regions Array of region labels
+/// @param count Number of regions
+/// @param style Grid cell style (used for font and colors)
+void NeruDrawRegionLabels(OverlayWindow window, RegionLabel *regions, int count, GridCellStyle style);
+
+/// Clear region labels
+/// @param window Overlay window handle
+void NeruClearRegionLabels(OverlayWindow window);
 
 #endif // OVERLAY_H

@@ -44,11 +44,13 @@ func gridResizeCompletionCallback(context unsafe.Pointer) {
 }
 
 var (
-	gridCellSlicePool     sync.Pool
-	gridLabelSlicePool    sync.Pool
-	subgridCellSlicePool  sync.Pool
-	subgridLabelSlicePool sync.Pool
-	gridPoolOnce          sync.Once
+	gridCellSlicePool      sync.Pool
+	gridLabelSlicePool     sync.Pool
+	subgridCellSlicePool   sync.Pool
+	subgridLabelSlicePool  sync.Pool
+	regionLabelSlicePool   sync.Pool
+	regionLabelCharPool    sync.Pool
+	gridPoolOnce           sync.Once
 )
 
 // Overlay manages the rendering of grid overlays using native platform APIs.
@@ -98,6 +100,16 @@ func initGridPools() {
 			return &s
 		}}
 		subgridLabelSlicePool = sync.Pool{New: func() any {
+			s := make([]*C.char, 0)
+
+			return &s
+		}}
+		regionLabelSlicePool = sync.Pool{New: func() any {
+			s := make([]C.RegionLabel, 0)
+
+			return &s
+		}}
+		regionLabelCharPool = sync.Pool{New: func() any {
 			s := make([]*C.char, 0)
 
 			return &s
@@ -295,7 +307,7 @@ func (o *Overlay) DrawGrid(grid *domainGrid.Grid, currentInput string, style Sty
 	// Full redraw
 	o.Clear()
 	visibleCells := o.filterCellsByViewport(cells)
-	o.drawGridCells(visibleCells, currentInput, style)
+	o.drawGridCells(visibleCells, currentInput, style, grid)
 
 	// Update cached state
 	o.gridStateMu.Lock()
@@ -387,6 +399,7 @@ func (o *Overlay) ShowSubgrid(cell *domainGrid.Cell, style Style) {
 
 		var gridCell C.GridCell
 		gridCell.label = labels[cellIndex]
+		gridCell.fullCoordinate = labels[cellIndex] // Subgrid uses same label for display and matching
 		gridCell.bounds.origin.x = C.double(left)
 		gridCell.bounds.origin.y = C.double(top)
 		gridCell.bounds.size.width = C.double(right - left)
@@ -532,6 +545,14 @@ func (o *Overlay) updateMatchesIncremental(grid *domainGrid.Grid, newInput, oldI
 	// Use the existing UpdateMatches method which calls NeruUpdateGridMatchPrefix
 	// This updates match states without clearing the entire overlay
 	o.UpdateMatches(newInput)
+
+	// Clear region labels when there's input (show only when input is empty)
+	if newInput != "" {
+		C.NeruClearRegionLabels(o.window)
+	} else {
+		// If input becomes empty, redraw region labels
+		o.drawRegionLabels(grid, o.previousStyle)
+	}
 
 	o.logger.Debug("Incremental match update",
 		zap.String("old_input", oldInput),
@@ -681,19 +702,28 @@ func (o *Overlay) convertCellsToC(cellsGo []*domainGrid.Cell, currentInput strin
 
 	cGridCells := make([]C.GridCell, len(cellsGo))
 	cLabels := make([]*C.char, len(cellsGo))
+	cFullCoords := make([]*C.char, len(cellsGo))
 
 	for cellIndex, cell := range cellsGo {
-		cLabels[cellIndex] = o.getOrCacheLabel(cell.Coordinate())
+		coord := cell.Coordinate()
+		// Only show last 2 characters for cell labels (hide first character)
+		displayLabel := coord
+		if len(coord) > 2 {
+			displayLabel = coord[1:]
+		}
+		cLabels[cellIndex] = o.getOrCacheLabel(displayLabel)
+		cFullCoords[cellIndex] = o.getOrCacheLabel(coord) // Store full coordinate for matching
 
 		isMatched := 0
 		matchedPrefixLength := 0
-		if currentInput != "" && strings.HasPrefix(cell.Coordinate(), currentInput) {
+		if currentInput != "" && strings.HasPrefix(coord, currentInput) {
 			isMatched = 1
 			matchedPrefixLength = len(currentInput)
 		}
 
 		cGridCells[cellIndex] = C.GridCell{
-			label: cLabels[cellIndex],
+			label:           cLabels[cellIndex],
+			fullCoordinate:  cFullCoords[cellIndex],
 			bounds: C.CGRect{
 				origin: C.CGPoint{
 					x: C.double(cell.Bounds().Min.X),
@@ -780,7 +810,7 @@ func (o *Overlay) getOrCacheLabel(label string) *C.char {
 }
 
 // drawGridCells draws all grid cells with their labels.
-func (o *Overlay) drawGridCells(cellsGo []*domainGrid.Cell, currentInput string, style Style) {
+func (o *Overlay) drawGridCells(cellsGo []*domainGrid.Cell, currentInput string, style Style, grid *domainGrid.Grid) {
 	tmpCells := gridCellSlicePool.Get()
 	cGridCellsPtr, ok := tmpCells.(*[]C.GridCell)
 	if !ok {
@@ -814,11 +844,17 @@ func (o *Overlay) drawGridCells(cellsGo []*domainGrid.Cell, currentInput string,
 
 	matchedCount := 0
 	for cellIndex, cell := range cellsGo {
-		cLabels[cellIndex] = o.getOrCacheLabel(cell.Coordinate())
+		coord := cell.Coordinate()
+		// Only show last 2 characters for cell labels (hide first character)
+		displayLabel := coord
+		if len(coord) > 2 {
+			displayLabel = coord[1:]
+		}
+		cLabels[cellIndex] = o.getOrCacheLabel(displayLabel)
 
 		isMatched := 0
 		matchedPrefixLength := 0
-		if currentInput != "" && strings.HasPrefix(cell.Coordinate(), currentInput) {
+		if currentInput != "" && strings.HasPrefix(coord, currentInput) {
 			isMatched = 1
 			matchedCount++
 			matchedPrefixLength = len(currentInput)
@@ -826,6 +862,7 @@ func (o *Overlay) drawGridCells(cellsGo []*domainGrid.Cell, currentInput string,
 
 		var cGridCell C.GridCell
 		cGridCell.label = cLabels[cellIndex]
+		cGridCell.fullCoordinate = o.getOrCacheLabel(coord) // Store full coordinate for matching
 		cGridCell.bounds.origin.x = C.double(cell.Bounds().Min.X)
 		cGridCell.bounds.origin.y = C.double(cell.Bounds().Min.Y)
 		cGridCell.bounds.size.width = C.double(cell.Bounds().Dx())
@@ -872,11 +909,118 @@ func (o *Overlay) drawGridCells(cellsGo []*domainGrid.Cell, currentInput string,
 	C.NeruClearOverlay(o.window)
 	C.NeruDrawGridCells(o.window, &cGridCells[0], C.int(len(cGridCells)), finalStyle)
 
+	// Draw region labels only when input is empty (hide when selecting)
+	if currentInput == "" {
+		o.drawRegionLabels(grid, style)
+	} else {
+		// Clear region labels when there's input
+		C.NeruClearRegionLabels(o.window)
+	}
+
 	*cGridCellsPtr = (*cGridCellsPtr)[:0]
 	*cLabelsPtr = (*cLabelsPtr)[:0]
 	gridCellSlicePool.Put(cGridCellsPtr)
 	gridLabelSlicePool.Put(cLabelsPtr)
 	// Note: We don't free cached style strings - they're reused across draws
+}
+
+// drawRegionLabels draws region labels for 2x3 overlay with large letters and thick borders.
+func (o *Overlay) drawRegionLabels(grid *domainGrid.Grid, style Style) {
+	if grid == nil {
+		return
+	}
+
+	regionLabels := grid.RegionLabels()
+	if len(regionLabels) == 0 {
+		return
+	}
+
+	// Get region labels pool
+	tmpRegions := regionLabelSlicePool.Get()
+	cRegionsPtr, ok := tmpRegions.(*[]C.RegionLabel)
+	if !ok {
+		s := make([]C.RegionLabel, len(regionLabels))
+		cRegionsPtr = &s
+	} else {
+		if cap(*cRegionsPtr) < len(regionLabels) {
+			s := make([]C.RegionLabel, len(regionLabels))
+			cRegionsPtr = &s
+		} else {
+			*cRegionsPtr = (*cRegionsPtr)[:len(regionLabels)]
+		}
+	}
+	cRegions := *cRegionsPtr
+
+	tmpChars := regionLabelCharPool.Get()
+	cCharsPtr, charOk := tmpChars.(*[]*C.char)
+	if !charOk {
+		s := make([]*C.char, len(regionLabels))
+		cCharsPtr = &s
+	} else {
+		if cap(*cCharsPtr) < len(regionLabels) {
+			s := make([]*C.char, len(regionLabels))
+			cCharsPtr = &s
+		} else {
+			*cCharsPtr = (*cCharsPtr)[:len(regionLabels)]
+		}
+	}
+	cChars := *cCharsPtr
+
+	for i, label := range regionLabels {
+		bounds, found := grid.RegionBounds(label)
+		if !found {
+			continue
+		}
+
+		cChars[i] = o.getOrCacheLabel(label)
+
+		cRegions[i] = C.RegionLabel{
+			label:     cChars[i],
+			bounds:    C.CGRect{
+				origin: C.CGPoint{
+					x: C.double(bounds.Min.X),
+					y: C.double(bounds.Min.Y),
+				},
+				size: C.CGSize{
+					width:  C.double(bounds.Dx()),
+					height: C.double(bounds.Dy()),
+				},
+			},
+			isMatched: C.int(0), // All regions visible when no input
+		}
+	}
+
+	// Use cached style strings
+	cachedStyle := o.styleCache.Get(func(cached *overlayutil.CachedStyle) {
+		cached.FontFamily = unsafe.Pointer(C.CString(style.FontFamily()))
+		cached.BgColor = unsafe.Pointer(C.CString(style.BackgroundColor()))
+		cached.TextColor = unsafe.Pointer(C.CString(style.TextColor()))
+		cached.MatchedTextColor = unsafe.Pointer(C.CString(style.MatchedTextColor()))
+		cached.MatchedBgColor = unsafe.Pointer(C.CString(style.MatchedBackgroundColor()))
+		cached.MatchedBorderColor = unsafe.Pointer(C.CString(style.MatchedBorderColor()))
+		cached.BorderColor = unsafe.Pointer(C.CString(style.BorderColor()))
+	})
+
+	finalStyle := C.GridCellStyle{
+		fontFamily:             (*C.char)(cachedStyle.FontFamily),
+		backgroundColor:        (*C.char)(cachedStyle.BgColor),
+		textColor:              (*C.char)(cachedStyle.TextColor),
+		matchedTextColor:       (*C.char)(cachedStyle.MatchedTextColor),
+		matchedBackgroundColor: (*C.char)(cachedStyle.MatchedBgColor),
+		matchedBorderColor:     (*C.char)(cachedStyle.MatchedBorderColor),
+		borderColor:            (*C.char)(cachedStyle.BorderColor),
+		backgroundOpacity:      C.double(style.Opacity()),
+		textOpacity:            C.double(1.0),
+		fontSize:               C.int(style.FontSize()),
+		borderWidth:            C.int(style.BorderWidth()),
+	}
+
+	C.NeruDrawRegionLabels(o.window, &cRegions[0], C.int(len(cRegions)), finalStyle)
+
+	*cRegionsPtr = (*cRegionsPtr)[:0]
+	*cCharsPtr = (*cCharsPtr)[:0]
+	regionLabelSlicePool.Put(cRegionsPtr)
+	regionLabelCharPool.Put(cCharsPtr)
 }
 
 // Style represents the visual style for grid cells.

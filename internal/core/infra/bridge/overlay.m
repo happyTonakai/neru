@@ -31,6 +31,7 @@ static inline BOOL rectsEqual(NSRect a, NSRect b, CGFloat epsilon) {
 
 @property(nonatomic, strong) NSMutableArray *gridCells;           ///< Grid cells array
 @property(nonatomic, strong) NSMutableArray *gridLines;           ///< Grid lines array
+@property(nonatomic, strong) NSMutableArray *regionLabels;        ///< Region labels for 2x3 overlay
 @property(nonatomic, strong) NSFont *gridFont;                    ///< Grid font
 @property(nonatomic, strong) NSColor *gridTextColor;              ///< Grid text color
 @property(nonatomic, strong) NSColor *gridMatchedTextColor;       ///< Grid matched text color
@@ -67,6 +68,7 @@ static inline BOOL rectsEqual(NSRect a, NSRect b, CGFloat epsilon) {
 		_hints = [NSMutableArray arrayWithCapacity:100];     // Pre-size for typical hint count
 		_gridCells = [NSMutableArray arrayWithCapacity:100]; // Pre-size for typical grid size
 		_gridLines = [NSMutableArray arrayWithCapacity:50];  // Pre-size for typical line count
+		_regionLabels = [NSMutableArray arrayWithCapacity:10]; // Pre-size for 2x3 region labels
 
 		_hintFont = [NSFont boldSystemFontOfSize:14.0];
 		_hintTextColor = [NSColor blackColor];
@@ -112,6 +114,9 @@ static inline BOOL rectsEqual(NSRect a, NSRect b, CGFloat epsilon) {
 
 	// Draw grid cells
 	[self drawGridCells];
+
+	// Draw region labels on top (with thick borders)
+	[self drawRegionLabels];
 
 	// Draw hints
 	[self drawHints];
@@ -474,6 +479,63 @@ static inline BOOL rectsEqual(NSRect a, NSRect b, CGFloat epsilon) {
 	[context restoreGraphicsState];
 }
 
+/// Draw region labels for 2x3 overlay
+- (void)drawRegionLabels {
+	if ([self.regionLabels count] == 0)
+		return;
+
+	NSGraphicsContext *context = [NSGraphicsContext currentContext];
+	[context saveGraphicsState];
+
+	NSScreen *mainScreen = [NSScreen mainScreen];
+	CGFloat screenHeight = [mainScreen frame].size.height;
+
+	for (NSDictionary *regionDict in self.regionLabels) {
+		NSString *label = regionDict[@"label"];
+		NSValue *boundsValue = regionDict[@"bounds"];
+		BOOL isMatched = [regionDict[@"isMatched"] boolValue];
+
+		CGRect bounds = [boundsValue rectValue];
+
+		// Convert coordinates (macOS uses bottom-left origin)
+		CGFloat flippedY = screenHeight - bounds.origin.y - bounds.size.height;
+		NSRect regionRect = NSMakeRect(bounds.origin.x, flippedY, bounds.size.width, bounds.size.height);
+
+		// Draw thicker border for region
+		NSColor *borderColor = self.gridBorderColor;
+		if (isMatched && self.gridMatchedBorderColor) {
+			borderColor = self.gridMatchedBorderColor;
+		}
+		[borderColor setStroke];
+		NSBezierPath *borderPath = [NSBezierPath bezierPathWithRect:regionRect];
+		[borderPath setLineWidth:3.0]; // Thicker border for regions
+		[borderPath stroke];
+
+		// Draw large label centered in region
+		if (label && [label length] > 0) {
+			// Use larger font for region labels
+			CGFloat labelFontSize = 48.0; // Large font for region labels
+			NSFont *labelFont = [NSFont boldSystemFontOfSize:labelFontSize];
+
+			NSMutableAttributedString *attrString = [[NSMutableAttributedString alloc] initWithString:label];
+			NSRange fullRange = NSMakeRange(0, [label length]);
+			[attrString setAttributes:@{
+				NSFontAttributeName : labelFont,
+				NSForegroundColorAttributeName : self.gridTextColor
+			}
+			                    range:fullRange];
+
+			NSSize textSize = [attrString size];
+			CGFloat textX = regionRect.origin.x + (regionRect.size.width - textSize.width) / 2.0;
+			CGFloat textY = regionRect.origin.y + (regionRect.size.height - textSize.height) / 2.0;
+
+			[attrString drawAtPoint:NSMakePoint(textX, textY)];
+		}
+	}
+
+	[context restoreGraphicsState];
+}
+
 /// Draw grid lines
 - (void)drawGridLines {
 	if ([self.gridLines count] == 0)
@@ -656,14 +718,84 @@ void NeruClearOverlay(OverlayWindow window) {
 		[controller.overlayView.hints removeAllObjects];
 		[controller.overlayView.gridCells removeAllObjects];
 		[controller.overlayView.gridLines removeAllObjects];
+		[controller.overlayView.regionLabels removeAllObjects];
 
 		[controller.overlayView setNeedsDisplay:YES];
 	} else {
-		dispatch_async(dispatch_get_main_queue(), ^{
+		dispatch_sync(dispatch_get_main_queue(), ^{
 			[controller.overlayView.hints removeAllObjects];
 			[controller.overlayView.gridCells removeAllObjects];
 			[controller.overlayView.gridLines removeAllObjects];
+			[controller.overlayView.regionLabels removeAllObjects];
 
+			[controller.overlayView setNeedsDisplay:YES];
+		});
+	}
+}
+
+/// Draw region labels for 2x3 overlay
+/// @param window Overlay window handle
+/// @param regions Array of region labels
+/// @param count Number of regions
+/// @param style Grid cell style (used for font and colors)
+void NeruDrawRegionLabels(OverlayWindow window, RegionLabel *regions, int count, GridCellStyle style) {
+	if (!window || !regions || count <= 0)
+		return;
+
+	OverlayWindowController *controller = (OverlayWindowController *)window;
+
+	if ([NSThread isMainThread]) {
+		// Build region data array
+		NSMutableArray *regionDicts = [NSMutableArray arrayWithCapacity:count];
+		for (int i = 0; i < count; i++) {
+			RegionLabel region = regions[i];
+			NSDictionary *regionDict = @{
+				@"label" : region.label ? @(region.label) : @"",
+				@"bounds" : [NSValue valueWithRect:NSRectFromCGRect(region.bounds)],
+				@"isMatched" : @(region.isMatched)
+			};
+			[regionDicts addObject:regionDict];
+		}
+
+		[controller.overlayView.regionLabels removeAllObjects];
+		[controller.overlayView.regionLabels addObjectsFromArray:regionDicts];
+		[controller.overlayView setNeedsDisplay:YES];
+	} else {
+		dispatch_sync(dispatch_get_main_queue(), ^{
+			// Build region data array
+			NSMutableArray *regionDicts = [NSMutableArray arrayWithCapacity:count];
+			for (int i = 0; i < count; i++) {
+				RegionLabel region = regions[i];
+				NSDictionary *regionDict = @{
+					@"label" : region.label ? @(region.label) : @"",
+					@"bounds" : [NSValue valueWithRect:NSRectFromCGRect(region.bounds)],
+					@"isMatched" : @(region.isMatched)
+				};
+				[regionDicts addObject:regionDict];
+			}
+
+			[controller.overlayView.regionLabels removeAllObjects];
+			[controller.overlayView.regionLabels addObjectsFromArray:regionDicts];
+			[controller.overlayView setNeedsDisplay:YES];
+		});
+	}
+}
+
+/// Clear region labels
+/// @param window Overlay window handle
+void NeruClearRegionLabels(OverlayWindow window) {
+	if (!window) {
+		return;
+	}
+
+	OverlayWindowController *controller = (OverlayWindowController *)window;
+
+	if ([NSThread isMainThread]) {
+		[controller.overlayView.regionLabels removeAllObjects];
+		[controller.overlayView setNeedsDisplay:YES];
+	} else {
+		dispatch_sync(dispatch_get_main_queue(), ^{
+			[controller.overlayView.regionLabels removeAllObjects];
 			[controller.overlayView setNeedsDisplay:YES];
 		});
 	}
@@ -1128,6 +1260,7 @@ void NeruDrawGridCells(OverlayWindow window, GridCell *cells, int count, GridCel
 		GridCell cell = cells[i];
 		NSDictionary *cellDict = @{
 			@"label" : cell.label ? @(cell.label) : @"",
+			@"fullCoordinate" : cell.fullCoordinate ? @(cell.fullCoordinate) : (cell.label ? @(cell.label) : @""),
 			@"bounds" : [NSValue valueWithRect:NSRectFromCGRect(cell.bounds)],
 			@"isMatched" : @(cell.isMatched),
 			@"isSubgrid" : @(cell.isSubgrid),
@@ -1207,11 +1340,12 @@ void NeruUpdateGridMatchPrefix(OverlayWindow window, const char *prefix) {
 		NSMutableArray *updated = [NSMutableArray arrayWithCapacity:[controller.overlayView.gridCells count]];
 		for (NSDictionary *cellDict in controller.overlayView.gridCells) {
 			NSString *label = cellDict[@"label"] ?: @"";
+			NSString *fullCoord = cellDict[@"fullCoordinate"] ?: label; // Use full coordinate for matching
 			BOOL isMatched = NO;
 			int matchedPrefixLength = 0;
-			if ([prefixStr length] > 0 && [label length] >= [prefixStr length]) {
-				NSString *lblPrefix = [label substringToIndex:[prefixStr length]];
-				isMatched = [lblPrefix isEqualToString:prefixStr];
+			if ([prefixStr length] > 0 && [fullCoord length] >= [prefixStr length]) {
+				NSString *coordPrefix = [fullCoord substringToIndex:[prefixStr length]];
+				isMatched = [coordPrefix isEqualToString:prefixStr];
 				if (isMatched) {
 					matchedPrefixLength = (int)[prefixStr length];
 				}
@@ -1219,6 +1353,7 @@ void NeruUpdateGridMatchPrefix(OverlayWindow window, const char *prefix) {
 			BOOL isSubgrid = [cellDict[@"isSubgrid"] boolValue];
 			NSDictionary *newDict = @{
 				@"label" : label,
+				@"fullCoordinate" : fullCoord,
 				@"bounds" : cellDict[@"bounds"],
 				@"isMatched" : @(isMatched),
 				@"isSubgrid" : @(isSubgrid),
