@@ -51,6 +51,9 @@ static inline BOOL rectsEqual(NSRect a, NSRect b, CGFloat epsilon) {
 // Cached string buffer to reduce allocations
 @property(nonatomic, strong) NSMutableAttributedString *cachedAttributedString; ///< Cached attributed string buffer
 
+// Current input prefix (controls region label visibility)
+@property(nonatomic, strong) NSString *currentInputPrefix; ///< Current input prefix for grid
+
 - (void)applyStyle:(HintStyle)style;                                                  ///< Apply hint style
 - (NSColor *)colorFromHex:(NSString *)hexString defaultColor:(NSColor *)defaultColor; ///< Color from hex string
 @end
@@ -115,8 +118,10 @@ static inline BOOL rectsEqual(NSRect a, NSRect b, CGFloat epsilon) {
 	// Draw grid cells
 	[self drawGridCells];
 
-	// Draw region labels on top (with thick borders)
-	[self drawRegionLabels];
+	// Draw region labels on top (with thick borders) - only when no input
+	if (self.currentInputPrefix.length == 0) {
+		[self drawRegionLabels];
+	}
 
 	// Draw hints
 	[self drawHints];
@@ -461,11 +466,13 @@ static inline BOOL rectsEqual(NSRect a, NSRect b, CGFloat epsilon) {
 
 			NSNumber *matchedPrefixLengthNum = cellDict[@"matchedPrefixLength"];
 			int matchedPrefixLength = matchedPrefixLengthNum ? [matchedPrefixLengthNum intValue] : 0;
-			if (isMatched && matchedPrefixLength > 0 && matchedPrefixLength <= [label length]) {
+			// matchedPrefixLength is based on full coordinate (e.g., "A00"), but displayLabel hides the first char (e.g., "00").
+			// So we need to adjust the highlight range to start from 0 and use (matchedPrefixLength - 1).
+			if (isMatched && matchedPrefixLength > 1 && (matchedPrefixLength - 1) <= [label length]) {
 				// Use cached matched color with opacity
 				[attrString addAttribute:NSForegroundColorAttributeName
 				                   value:self.cachedGridMatchedTextColorWithOpacity
-				                   range:NSMakeRange(0, matchedPrefixLength)];
+				                   range:NSMakeRange(0, matchedPrefixLength - 1)];
 			}
 
 			NSSize textSize = [attrString size];
@@ -796,6 +803,29 @@ void NeruClearRegionLabels(OverlayWindow window) {
 	} else {
 		dispatch_sync(dispatch_get_main_queue(), ^{
 			[controller.overlayView.regionLabels removeAllObjects];
+			[controller.overlayView setNeedsDisplay:YES];
+		});
+	}
+}
+
+/// Set current input prefix (controls region label visibility)
+/// @param window Overlay window handle
+/// @param prefix Current input prefix (empty string when no input)
+void NeruSetGridInputPrefix(OverlayWindow window, const char *prefix) {
+	if (!window) {
+		return;
+	}
+
+	OverlayWindowController *controller = (OverlayWindowController *)window;
+
+	NSString *inputPrefix = prefix ? @(prefix) : @"";
+
+	if ([NSThread isMainThread]) {
+		controller.overlayView.currentInputPrefix = inputPrefix;
+		[controller.overlayView setNeedsDisplay:YES];
+	} else {
+		dispatch_sync(dispatch_get_main_queue(), ^{
+			controller.overlayView.currentInputPrefix = inputPrefix;
 			[controller.overlayView setNeedsDisplay:YES];
 		});
 	}

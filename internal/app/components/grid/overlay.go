@@ -222,6 +222,9 @@ func (o *Overlay) Hide() {
 // Clear clears the grid overlay and resets state.
 func (o *Overlay) Clear() {
 	C.NeruClearOverlay(o.window)
+	// Reset current input prefix so region labels will show again when overlay redraws
+	// Pass nil to indicate empty string (Objective-C handles nil as empty string)
+	C.NeruSetGridInputPrefix(o.window, nil)
 	// Reset previous state so next draw will be a full redraw
 	o.gridStateMu.Lock()
 	o.previousGrid = nil
@@ -332,6 +335,8 @@ func (o *Overlay) UpdateMatches(prefix string) {
 	cPrefix := C.CString(prefix)
 	defer C.free(unsafe.Pointer(cPrefix)) //nolint:nlreturn
 	C.NeruUpdateGridMatchPrefix(o.window, cPrefix)
+	// Also update input prefix to control region label visibility
+	C.NeruSetGridInputPrefix(o.window, cPrefix)
 }
 
 // ShowSubgrid draws a 3x3 subgrid inside the selected cell.
@@ -546,11 +551,13 @@ func (o *Overlay) updateMatchesIncremental(grid *domainGrid.Grid, newInput, oldI
 	// This updates match states without clearing the entire overlay
 	o.UpdateMatches(newInput)
 
-	// Clear region labels when there's input (show only when input is empty)
-	if newInput != "" {
-		C.NeruClearRegionLabels(o.window)
-	} else {
-		// If input becomes empty, redraw region labels
+	// Update input prefix to control region label visibility
+	cPrefix := C.CString(newInput)
+	defer C.free(unsafe.Pointer(cPrefix))
+	C.NeruSetGridInputPrefix(o.window, cPrefix)
+
+	// If input becomes empty, redraw region labels
+	if newInput == "" {
 		o.drawRegionLabels(grid, o.previousStyle)
 	}
 
@@ -909,12 +916,14 @@ func (o *Overlay) drawGridCells(cellsGo []*domainGrid.Cell, currentInput string,
 	C.NeruClearOverlay(o.window)
 	C.NeruDrawGridCells(o.window, &cGridCells[0], C.int(len(cGridCells)), finalStyle)
 
+	// Update input prefix to control region label visibility
+	cPrefix := C.CString(currentInput)
+	defer C.free(unsafe.Pointer(cPrefix))
+	C.NeruSetGridInputPrefix(o.window, cPrefix)
+
 	// Draw region labels only when input is empty (hide when selecting)
 	if currentInput == "" {
 		o.drawRegionLabels(grid, style)
-	} else {
-		// Clear region labels when there's input
-		C.NeruClearRegionLabels(o.window)
 	}
 
 	*cGridCellsPtr = (*cGridCellsPtr)[:0]

@@ -191,4 +191,9 @@ void NeruDrawRegionLabels(OverlayWindow window, RegionLabel *regions, int count,
 /// @param window Overlay window handle
 void NeruClearRegionLabels(OverlayWindow window);
 
+/// Set current input prefix (used to control region label visibility)
+/// @param window Overlay window handle
+/// @param prefix Current input prefix (empty string when no input)
+void NeruSetGridInputPrefix(OverlayWindow window, const char *prefix);
+
 #endif // OVERLAY_H
