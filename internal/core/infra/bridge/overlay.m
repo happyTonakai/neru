@@ -600,8 +600,20 @@ static inline BOOL rectsEqual(NSRect a, NSRect b, CGFloat epsilon) {
 
 /// Create window
 - (void)createWindow {
-	NSScreen *mainScreen = [NSScreen mainScreen];
-	NSRect screenFrame = [mainScreen frame];
+	// Find the screen containing the frontmost window (active app)
+	NSScreen *activeScreen = nil;
+	NSWindow *frontmostWindow = [[NSApplication sharedApplication] keyWindow];
+	if (frontmostWindow) {
+		// Get the screen that contains the frontmost window
+		activeScreen = [frontmostWindow screen];
+	}
+
+	// Fall back to main screen if no frontmost window
+	if (!activeScreen) {
+		activeScreen = [NSScreen mainScreen];
+	}
+
+	NSRect screenFrame = activeScreen.frame;
 
 	self.window = [[NSWindow alloc] initWithContentRect:screenFrame
 	                                          styleMask:NSWindowStyleMaskBorderless
@@ -879,14 +891,11 @@ void NeruResizeOverlayToActiveScreen(OverlayWindow window) {
 
 	OverlayWindowController *controller = (OverlayWindowController *)window;
 	dispatch_async(dispatch_get_main_queue(), ^{
-		NSPoint mouseLoc = [NSEvent mouseLocation];
-
+		// Find the screen containing the frontmost window (active app)
 		NSScreen *activeScreen = nil;
-		for (NSScreen *screen in [NSScreen screens]) {
-			if (NSPointInRect(mouseLoc, screen.frame)) {
-				activeScreen = screen;
-				break;
-			}
+		NSWindow *frontmostWindow = [[NSApplication sharedApplication] keyWindow];
+		if (frontmostWindow) {
+			activeScreen = [frontmostWindow screen];
 		}
 
 		if (!activeScreen) {
@@ -936,14 +945,11 @@ void NeruResizeOverlayToActiveScreenWithCallback(OverlayWindow window, ResizeCom
 
 	OverlayWindowController *controller = (OverlayWindowController *)window;
 	dispatch_async(dispatch_get_main_queue(), ^{
-		NSPoint mouseLoc = [NSEvent mouseLocation];
-
+		// Find the screen containing the frontmost window (active app)
 		NSScreen *activeScreen = nil;
-		for (NSScreen *screen in [NSScreen screens]) {
-			if (NSPointInRect(mouseLoc, screen.frame)) {
-				activeScreen = screen;
-				break;
-			}
+		NSWindow *frontmostWindow = [[NSApplication sharedApplication] keyWindow];
+		if (frontmostWindow) {
+			activeScreen = [frontmostWindow screen];
 		}
 
 		if (!activeScreen) {
